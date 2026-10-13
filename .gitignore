@@ -1,0 +1,7 @@
+tmp/
+*.jsonl
+*.db
+*.sqlite*
+*.bak
+.env*
+.DS_Store
