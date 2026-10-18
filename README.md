@@ -1,28 +1,36 @@
 # Codex TPS Hook
 
-A local `Stop` hook that shows response speed, latency, tokens, cache usage, and estimated API token cost after a Codex turn.
+Local Codex hooks for **request totals, complete session totals, and separate main/subagent throughput**.
 
-[Türkçe açıklama ve kurulum](README.tr.md) · [Instructions for Codex](AGENTS.md) · [Customization](docs/customization.md) · [MIT license](LICENSE)
+[Türkçe](README.tr.md) · [Update notes](CHANGELOG.md) · [Codex instructions](AGENTS.md) · [Customization](docs/customization.md) · [MIT](LICENSE)
+
+The current request shows main-session and subagent blocks, followed by combined Input, Output, Reasoning, Cache, Hit, and estimated Standard/Fast API cost. A separate **Entire session** block includes earlier requests and their subagents. The hook no longer reports only the final API response.
+
+Synthetic output excerpt:
 
 ```text
-⚡ Decode≈ 50.0 · TPS≈ 35.7
-⏱ First generation≈ 2.0s · First text≈ 3.1s
-Σ Token · Input 1,000 · Output 250 (Reasoning 100)
-↻ Cache 800 · Hit 80.0%
-💵 API/last call · gpt-6.1-sol · Standard≈ $0.0030 · Fast≈ $0.0060
+Σ Request total · Input 20,000 · Output 2,000 (Reasoning 80)
+↻ Request total · Cache 1,600 · Hit 8.0%
+💵 Request total · 4 calls · Standard≈ $0.0571 · Fast≈ $0.1141
+
+📚 Entire session · 1 request · 4 calls
+👤 Main session · 2 calls · Decode≈ 125.0 · TPS≈ 100.0 · Standard≈ $0.0110 · Fast≈ $0.0220
+🤖 Subagents · 2 calls · Decode≈ 125.0 · TPS≈ 100.0 · Standard≈ $0.0461 · Fast≈ $0.0921
+Σ Session total · Input 20,000 · Output 2,000 (Reasoning 80)
+↻ Session total · Cache 1,600 · Hit 8.0%
+💵 Session total · Standard≈ $0.0571 · Fast≈ $0.1141
 ```
 
-Illustrative output from a synthetic response. The rows describe the **last recorded model response**, not the whole turn or session. One turn can include many model responses and tool calls.
-
-## Install
+## Install or update
 
 Requirements:
 
-- A local Codex CLI/Desktop installation that supports `Stop` command hooks and exposes `token_usage_record` entries in its JSONL transcript. Validated locally with Codex CLI **0.162.1** and PowerShell **7.6.6** on Windows. Older/different transcript formats may produce no metrics.
-- **PowerShell 7+** (`pwsh`) accessible from Codex's environment. Windows PowerShell 5.1 (`powershell.exe`) is insufficient. PowerShell is also available for macOS/Linux; those operating systems have not been tested in a native Codex session here.
-- Git, or download and extract this repository's ZIP from GitHub's **Code → Download ZIP** menu.
+- Local Codex CLI/Desktop with command hooks and JSONL `token_usage_record` entries.
+- **PowerShell 7+** (`pwsh`); Windows PowerShell 5.1 is insufficient.
+- **Python 3.10+**, now required for the bundled SQLite archive and subagent discovery. No pip packages, API keys, or network service are required.
+- Git, or extract GitHub's **Code → Download ZIP**.
 
-Run these commands in PowerShell, Terminal, or your shell:
+Validated on Windows with Codex CLI 0.163.0, PowerShell 7.6.6, and Python 3.14.0. Native macOS/Linux Codex acceptance has not been performed.
 
 ```sh
 git clone https://github.com/alicanselcuk/codex-tps-hook.git
@@ -30,89 +38,59 @@ cd codex-tps-hook
 pwsh -NoLogo -NoProfile -File ./install.ps1
 ```
 
-The installer copies the two runtime files into `<Codex home>/hooks/codex-tps-hook/` and merges one `Stop` handler into `<Codex home>/hooks.json`. It uses `CODEX_HOME` when set, otherwise your user profile's `.codex` directory. It preserves other hook handlers/events and backs up existing registration and previously installed assets under `<Codex home>/backups/codex-tps-hook/`. Re-running it updates the same registration.
-
-Open a **new Codex session**. Non-managed hooks require review and trust: use **`/hooks` in Codex CLI**. In Desktop, use its hook review UI if available, or review with the CLI using the same Codex home. The installer does not edit trust state. Codex can skip untrusted or changed definitions. See the [official hook documentation](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
-
-For Turkish labels and dot-separated token counts:
+For an existing clean checkout, pull the updates and rerun the installer. Pass your preferred options again:
 
 ```sh
 pwsh -NoLogo -NoProfile -File ./install.ps1 -Language tr
+pwsh -NoLogo -NoProfile -File ./install.ps1 -Language en -HideCost
+pwsh -NoLogo -NoProfile -File ./install.ps1 -PythonPath "/absolute/path/to/python" -DryRun
 ```
 
-Preview the merged registration without changing files:
+The installer detects `python` or `python3`; `-PythonPath` selects a specific executable. It copies all runtime helpers and bundled Python files into `<Codex home>/hooks/codex-tps-hook/`, generates machine-local paths, and merges **Stop (30 seconds)** and **SubagentStop (5 seconds)** handlers. Other events/handlers are preserved. Reinstalling deduplicates both registrations and preserves the usage database and an existing custom database setting. Previous assets and registration are backed up under `<Codex home>/backups/codex-tps-hook/`.
 
-```sh
-pwsh -NoLogo -NoProfile -File ./install.ps1 -DryRun
-```
+The active home is `CODEX_HOME`, otherwise the profile's `.codex`. Use `-CodexHome` for a different installation target; this does not select the configuration Codex loads. The installer does not change `config.toml`, hook trust, model, effort, or tier.
 
-Use `-CodexHome "/absolute/path/to/your/codex-home"` for a different **active** Codex home. This flag chooses the installation target; it does not change which configuration Codex loads. If `[features].hooks = false` is configured, enable hooks deliberately in your existing configuration. Enterprise policy may disallow user hooks. Do not replace `config.toml` to install this package.
+**Open a new Codex session and trust both handlers with `/hooks` in CLI**, or the available Desktop review UI using the same Codex home. Updated definitions need review again. This is a [Codex requirement](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks). Policy-disabled hooks must be resolved in the user's existing configuration.
 
-## Ask Codex to install it
+## What is counted
 
-Paste this into a local Codex chat:
+- **This request:** every recorded model call belonging to its root turn, with main and subagent metrics shown separately.
+- **Entire session:** the main chat's historical calls plus subagent calls attached to those requests. Unrelated chats and inherited parent calls are excluded.
+- **TPS/Decode:** sum of output tokens divided by sum of matching measured call durations. Parallel agent speeds are not added together. TPS includes the pre-generation wait; Decode uses the approximate generation span. Tool execution is excluded when generation timing is available.
+- **Latency:** averages of available first-generation/message item delays. These lifecycle timestamps are not exact first-token measurements.
+- **Tokens:** summed Input/Output/Reasoning. Reasoning is already inside Output and is not counted twice.
+- **Cache/Hit:** summed cache reads and total matched cache reads ÷ total matched input. Group percentages are not averaged.
+- **Cost:** each call is priced using its own model and context band, then summed. Standard/Fast are API-equivalent estimates, not your subscription bill, actual service tier, or credits. Tool fees and billing adjustments are excluded.
 
-> Install https://github.com/alicanselcuk/codex-tps-hook for my local Codex. Read its README.md and AGENTS.md, inspect the scripts, detect my active Codex home and PowerShell version, and use its installer while preserving my existing hooks. Run the repository tests. Explain any remaining hook trust step. Do not upload or share my configuration or transcripts.
+Missing timings show measurement coverage. Partially known token/cost totals show `+ ?`; completely unknown values show `n/a`.
 
-For customization:
+## Local storage and completeness
 
-> Read the Codex TPS Hook README.md, AGENTS.md, and docs/customization.md. Change my installed hook to Turkish and hide the cost row. Preserve other hooks and the metric definitions, back up the current files, verify the change with synthetic data, and tell me how to reload it.
+The archive is `<installed hook>/usage/data/usage.sqlite3` by default. It stores IDs, project paths, model names, and numeric measurements/cost estimates; **no prompts or response text**. It never uploads data. Historical measurements and prices are preserved. Session + local turn + response ID prevents duplicate counting. Existing archive schemas are upgraded locally without discarding measurements.
 
-Codex can edit the installed script for requested layout/fields, or maintain a checkout and reinstall it. Reinstalling copies the package's script and pricing catalog over installed versions, so transfer custom changes into that checkout first. Previous installed files are backed up. [Agent instructions](AGENTS.md) explain the boundaries and verification.
+At main Stop, the hook reads available main/descendant transcripts. The Codex `state_5.sqlite` thread index is opened **read-only** to locate descendants. SubagentStop also saves calls when an agent finishes. These are snapshots: calls produced later by a still-running agent are added to the archive later, not retroactively to an already displayed card.
 
-## What the numbers mean
+Missing/deleted transcripts, an unavailable native index, or archive errors produce a partial-coverage warning. Interrupted work without a later hook may be absent. Very large histories can still exceed the 30-second main hook limit; the native index/transcript format can change between Codex versions.
 
-| Field | Meaning |
-| --- | --- |
-| `Decode≈` | Output tokens ÷ approximate generation span, starting at the earliest timed reasoning/message item and ending at generation completion. |
-| `TPS≈` | Output tokens ÷ elapsed time from the latest recorded model input (or turn start/previous usage record fallback) to generation completion. Includes waiting before generation; excludes a tool's own completion timing when generation end is available. |
-| First generation/text | Delay from that input boundary to the first timed reasoning/message item or first timed assistant message. These are lifecycle timestamps, **not exact first-token measurements**. |
-| Input / Output / Reasoning | Counts from the same last response. Reasoning is already included in Output; it is never added twice. |
-| Cache / Hit | Cached input tokens and cached input ÷ total input × 100. Zero input yields `n/a` for Hit. |
-| Standard / Fast | Two estimated API token-price comparisons for the same response. Neither is a claim about your actual bill or subscription usage. |
+## Ask Codex to install or customize it
 
-The script reads the selected `turn_id` only and stops at the next turn. Missing item timing yields `n/a` for Decode/latencies while available token metrics remain. Missing usage records, missing transcripts, irrelevant events, or malformed input produce no output and exit successfully. It returns a JSON `systemMessage`; it never blocks or continues the agent.
+> Install https://github.com/alicanselcuk/codex-tps-hook for my local Codex. Read README.md and AGENTS.md, inspect the installer and runtime, detect my active Codex home and PowerShell/Python versions, and preserve my existing hooks. Run the repository tests and explain the remaining trust step. Do not upload my configuration, usage database, or transcripts.
 
-**Pricing snapshot:** [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), verified **2026-10-13**, USD per 1M tokens. The catalog covers the explicitly listed model IDs only. Unknown models, unavailable rates, or insufficient cache-write data yield `n/a`. Short context is ≤272,000 input tokens; long context is above that threshold. Discounts, regional uplifts, tool fees, subscription allowances, and other billing adjustments are excluded. Prices are not fetched automatically. [See how to update the catalog](docs/customization.md#pricing).
+For requested layout or language changes, see [customization](docs/customization.md). Reinstallation replaces packaged code; keep custom code in your maintained checkout. `-HideCost` hides every cost row and inline session cost while leaving throughput/token/cache rows. It does not disable local cost calculation/storage. Defaults on each install are English and visible cost; direct script invocation defaults to Turkish.
 
-## Customize / update / uninstall
-
-Hide the cost row (combine with `-Language tr` if desired):
-
-```sh
-pwsh -NoLogo -NoProfile -File ./install.ps1 -HideCost
-```
-
-Each install invocation sets both options: the defaults are `-Language en` and a visible cost row. Pass your preferred flags again when updating.
-
-To update a clean checkout, pull this repository and run the installer again with your preferred flags. For layout changes, additional fields, and manual installation, use [docs/customization.md](docs/customization.md).
-
-```sh
-pwsh -NoLogo -NoProfile -File ./install.ps1 -Action Uninstall
-```
-
-Uninstall removes only this package's registration from the selected `hooks.json`; installed files and backups are retained. Other configuration layers may still contain their own metrics hooks. Open a new Codex session after changes and review changed definitions again when Codex requests it.
-
-## Verify / troubleshoot
+## Verify and uninstall
 
 ```sh
 pwsh -NoLogo -NoProfile -File ./turn-metrics.tests.ps1
 pwsh -NoLogo -NoProfile -File ./install.tests.ps1
+python -m unittest discover -s tests -v
+pwsh -NoLogo -NoProfile -File ./install.ps1 -Action Uninstall
 ```
 
-Tests use temporary synthetic transcripts and isolated Codex homes. They cover calculation boundaries, unavailable data, Unicode transport, language/cost options, merge, backups, repeated install/uninstall, malformed configuration, and shell path quoting. They do not exercise a real Codex UI or bypass trust.
+Tests use isolated homes, synthetic transcripts, and temporary SQLite files. They cover weighted rates, totals, subagents, history, language/cost visibility, quoting, merge/backups, replay, and database preservation. They do not establish real Codex UI/trust acceptance.
 
-If no metrics appear, check `pwsh --version`, the active Codex home, hook trust, disabled hooks/policy, and whether your transcript has `token_usage_record` entries for that turn. A model not listed in the pricing catalog can still show speed/token metrics. If rows appear twice, inspect `/hooks` for an older installation, project-local handler, or inline `[hooks]` definition; Codex runs matching hooks from multiple sources. Remove only the duplicate you identify.
+Uninstall removes only this package's two registrations. Installed code, the usage database, and backups are retained. If output appears twice, inspect `/hooks` for older/project/inline installations; remove only the duplicate you identify.
 
-The hook scans the transcript locally on every Stop. Very large transcripts can exceed the configured **5-second hook timeout**. It does not upload data, call an API, write a database, require an API key, or change your model/effort/tier. Transcripts are read-only. The installer writes local registration/assets/backups only. Never commit real transcripts, hook trust state, or account configuration.
+**Pricing snapshot:** [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), verified 2026-10-13. The catalog is unchanged in this update. Unknown models/rates stay unknown; prices are not fetched automatically. Never commit real transcripts, archives, generated settings, account configuration, or trust state.
 
-## Files
-
-- `turn-metrics.ps1`: runtime parser, calculations, and display.
-- `turn-metrics-pricing.json`: editable, dated API price snapshot.
-- `install.ps1`: merge/install, preview, and unregister.
-- `*.tests.ps1`: dependency-free regression checks.
-- `AGENTS.md`: instructions for Codex installation/customization.
-- `docs/customization.md`: manual configuration and calculation contracts.
-
-Community project; not an official OpenAI product. Released under the [MIT license](LICENSE).
+Community project; not an official OpenAI product.

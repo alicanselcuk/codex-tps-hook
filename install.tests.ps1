@@ -30,6 +30,7 @@ try {
         description = 'Unrelated user metadata'
         hooks = [ordered]@{
             SessionStart = @(@{ matcher = 'startup'; hooks = @(@{ type = 'command'; command = 'echo startup' }) })
+            SubagentStop = @(@{ hooks = @(@{ type = 'command'; command = 'echo keep-child' }) })
             Stop = @(@{ matcher = ''; hooks = @(@{ type = 'command'; command = 'echo keep-me'; timeout = 17 }) })
         }
     }
@@ -42,6 +43,8 @@ try {
     Assert-True ($installed.hooks.SessionStart[0].hooks[0].command -eq 'echo startup') 'Other events changed.'
     Assert-True ($installed.hooks.Stop[0].hooks[0].command -eq 'echo keep-me' -and $installed.hooks.Stop[0].hooks[0].timeout -eq 17) 'Other Stop hook changed.'
     Assert-True ($installed.hooks.Stop.Count -eq 2) 'Expected exactly one added Stop group.'
+    Assert-True ($installed.hooks.SubagentStop.Count -eq 2) 'Expected exactly one added SubagentStop group.'
+    Assert-True ($installed.hooks.Stop[1].hooks[0].timeout -eq 30 -and $installed.hooks.SubagentStop[1].hooks[0].timeout -eq 5) 'Hook time budgets changed.'
     $handler = $installed.hooks.Stop[1].hooks[0]
     $windowsInvocation = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String(($handler.commandWindows -split ' ')[-1]))
     Assert-True ($windowsInvocation.Contains('-Language tr -HideCost')) 'Install options were not applied.'
@@ -89,6 +92,7 @@ try {
     Assert-True ($result.ExitCode -eq 0) "Reinstall failed: $($result.Output)"
     $installed = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json -AsHashtable
     Assert-True ($installed.hooks.Stop.Count -eq 2) 'Reinstall duplicated the registration.'
+    Assert-True ($installed.hooks.SubagentStop.Count -eq 2) 'Reinstall duplicated the subagent registration.'
     Assert-True ($installed.hooks.Stop[1].hooks[0].command.Contains('-Language en')) 'Reinstall did not update language.'
     $backups = @(Get-ChildItem -LiteralPath (Join-Path $testHome 'backups/codex-tps-hook') -Directory)
     $savedScripts = @($backups | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'turn-metrics.ps1') })
@@ -104,11 +108,12 @@ try {
     $uninstalled = $uninstalledJson | ConvertFrom-Json -AsHashtable
     Assert-True ($uninstalled.hooks.Stop.Count -eq 1 -and $uninstalled.hooks.Stop[0].hooks.Count -eq 1) 'Uninstall changed unrelated Stop hooks.'
     Assert-True ($uninstalled.hooks.Stop[0].hooks[0].command -eq 'echo keep-me') 'Uninstall removed another hook.'
+    Assert-True ($uninstalled.hooks.SubagentStop.Count -eq 1 -and $uninstalled.hooks.SubagentStop[0].hooks[0].command -eq 'echo keep-child') 'Uninstall changed another subagent hook.'
     Assert-True (Test-Path -LiteralPath $installedScript) 'Uninstall deleted user-customizable scripts.'
     $result = Invoke-Installer @('-Action', 'Uninstall')
     Assert-True ($result.ExitCode -eq 0 -and [IO.File]::ReadAllText($configPath) -eq $uninstalledJson) 'Repeated uninstall changed configuration.'
 
-    foreach ($invalidJson in @('{broken', '[]', '[{"hooks":{}}]', '{"hooks":[]}', '{"hooks":{"Stop":{}}}', '{"hooks":{"Stop":[{"hooks":{}}]}}')) {
+    foreach ($invalidJson in @('{broken', '[]', '[{"hooks":{}}]', '{"hooks":[]}', '{"hooks":{"Stop":{}}}', '{"hooks":{"Stop":[{"hooks":{}}]}}', '{"hooks":{"SubagentStop":{}}}', '{"hooks":{"SubagentStop":[{"hooks":{}}]}}')) {
         [IO.File]::WriteAllText($configPath, $invalidJson)
         $result = Invoke-Installer @()
         Assert-True ($result.ExitCode -ne 0) "Invalid config was accepted: $invalidJson"

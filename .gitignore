@@ -5,3 +5,8 @@ tmp/
 *.bak
 .env*
 .DS_Store
+__pycache__/
+*.pyc
+usage/data/
+usage/settings.json
+turn-metrics-store.json
